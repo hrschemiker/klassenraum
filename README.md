@@ -1,6 +1,6 @@
 # Deterministic Media Control Plane
 
-Current release: `1.3.7`
+Current release: `1.3.11`
 
 [![CI](https://github.com/hrschemiker/bbb-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/hrschemiker/bbb-control-plane/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-0f766e.svg)](LICENSE)

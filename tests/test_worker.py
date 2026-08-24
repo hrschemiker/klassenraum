@@ -25,5 +25,15 @@ class WorkerTests(unittest.TestCase):
             path.write_bytes((b"recording-block" * 100000) + b"tail")
             self.assertEqual(worker.sha256_file(path), hashlib.sha256(path.read_bytes()).hexdigest())
 
+    def test_safe_filename_uses_student_and_session_date(self):
+        name = worker.safe_filename({"gtbp_student_name": "Zahra Test", "gtbp_session_date": "1405/05/31"}, "record", ".m4v")
+        self.assertEqual(name, "Zahra Test - 1405-05-31.m4v")
+
+    def test_safe_filename_removes_path_characters(self):
+        name = worker.safe_filename({"gtbp_student_name": "A/B\\C", "gtbp_session_date": "2026:08:22"}, "record", ".mp4")
+        self.assertNotIn("/", name)
+        self.assertNotIn("\\", name)
+        self.assertNotIn(":", name)
+
 
 if __name__ == '__main__': unittest.main()

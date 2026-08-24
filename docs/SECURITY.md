@@ -10,6 +10,14 @@
 - Rotate the bot token through the official bot-management interface on suspected disclosure.
 - Do not commit generated environment files.
 
+## Firewall
+
+- `ufw` allows 22 (OpenSSH), 80, 443, and 16384-32768/udp; everything else is denied.
+- The resolved `WORDPRESS_URL` IPv4 address is explicitly allowed on 80/443 and
+  listed in fail2ban `ignoreip`, so bridge API traffic can never be banned.
+- `bcpctl health` reports the whitelist state; `bcpctl whitelist-wordpress`
+  restores it after an IP change of the WordPress host.
+
 ## SSH
 
 - Use Ed25519 keys.
