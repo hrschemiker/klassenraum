@@ -58,6 +58,30 @@ public=$(curl -4fsS --max-time 10 https://api.ipify.org)
 [ "$resolved" = "$public" ] || die "DNS $resolved does not match public IPv4 $public"
 export DEBIAN_FRONTEND=noninteractive
 
+wordpress_ipv4(){
+  wordpress_host=$(python3 -c 'import sys; from urllib.parse import urlparse; print(urlparse(sys.argv[1]).hostname or "")' "$WORDPRESS_URL")
+  [ -n "$wordpress_host" ] || die "WORDPRESS_URL does not contain a hostname"
+  wordpress_ip=$(getent ahostsv4 "$wordpress_host" | awk 'NR==1{print $1}')
+  [ -n "$wordpress_ip" ] || die "WordPress host $wordpress_host does not resolve to an IPv4 address"
+}
+
+whitelist_wordpress_host(){
+  # The WordPress site talks to the BigBlueButton API over HTTPS. If the shared
+  # host is ever caught by fail2ban or a broad ufw rule, every bridge call ends
+  # in "cURL error 28" with HTTP status 0, so the host is whitelisted explicitly.
+  wordpress_ipv4
+  ufw allow from "$wordpress_ip" to any port 443 proto tcp comment 'WordPress bridge API'
+  ufw allow from "$wordpress_ip" to any port 80 proto tcp comment 'WordPress bridge HTTP'
+  install -d -m 0755 /etc/fail2ban/jail.d
+  printf '%s\n' '[DEFAULT]' "ignoreip = 127.0.0.1/8 ::1 $wordpress_ip" > /etc/fail2ban/jail.d/bcp-wordpress.local
+  log "WordPress host $wordpress_host ($wordpress_ip) whitelisted in ufw and fail2ban"
+}
+
+unban_wordpress_host(){
+  # Lift any ban recorded before the whitelist existed.
+  fail2ban-client unban "$wordpress_ip" >/dev/null 2>&1 || true
+}
+
 wait_existing_installer(){
   phase waiting_for_previous_installer
   waited=0
@@ -293,9 +317,11 @@ ufw allow OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw allow 16384:32768/udp
+whitelist_wordpress_host
 ufw --force enable
 systemctl daemon-reload
 start_required_service fail2ban
+unban_wordpress_host
 start_required_service telegram-bot-api
 start_required_service bcp-retention.timer
 systemctl enable bcp-worker
@@ -331,6 +357,10 @@ python3 /usr/local/lib/bcp-verify-join-url.py "https://$BBB_HOSTNAME" "$bbb_secr
 bbb-conf --check
 bbb-record --check
 curl -fkIsS --max-time 20 "https://$BBB_HOSTNAME/" >/dev/null
+ufw status | grep -Fq "$wordpress_ip" || die "WordPress host $wordpress_ip is missing from the ufw whitelist"
+log "NOTICE: the local firewall accepts the WordPress host. If the WordPress site still reports"
+log "NOTICE: 'cURL error 28' on port 443, ask the datacenter of this server to allow inbound"
+log "NOTICE: TCP 80/443 from $wordpress_ip in their upstream/edge firewall."
 dpkg --audit | tee "$STATE_DIR/dpkg-audit.txt"
 [ ! -s "$STATE_DIR/dpkg-audit.txt" ] || die "package audit reported incomplete packages"
 [ ! -f /var/run/reboot-required ] || log "NOTICE: Ubuntu requests a reboot after provisioning"
