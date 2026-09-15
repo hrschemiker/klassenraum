@@ -4179,7 +4179,7 @@ class GermanTeacherBookingPlugin_v10 {
 
         /* ---------- گوگل میت: جستجو و اختصاص دقیق ضبط به جلسه ---------- */
         echo '<div class="card" style="max-width:1100px;padding:20px;margin-top:22px;border-right:5px solid #34a853">';
-        echo '<h2>گوگل میت — اختصاص ویدئوی ضبط‌شده به جلسه</h2>';
+        echo '<h2>گوگل میت – اختصاص ویدئوی ضبط‌شده به جلسه</h2>';
         if (!$this->meet_available()) {
             echo '<p style="color:#b45309">اتصال گوگل میت هنوز کامل نیست. ابتدا از تب سرویس کلاس آنلاین، حساب گوگل را متصل کنید.</p>';
         } else {
@@ -4194,7 +4194,7 @@ class GermanTeacherBookingPlugin_v10 {
                 foreach ($meet_results as $entry) {
                     $b = $entry['booking'];
                     echo '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:14px;background:#fff">';
-                    echo '<h3 style="margin:0 0 8px">#' . intval($b->id) . ' — ' . esc_html(trim($b->first_name . ' ' . $b->last_name)) . ' | ' . esc_html($b->class_name) . '</h3>';
+                    echo '<h3 style="margin:0 0 8px">#' . intval($b->id) . ' – ' . esc_html(trim($b->first_name . ' ' . $b->last_name)) . ' | ' . esc_html($b->class_name) . '</h3>';
                     echo '<p style="margin:0 0 10px;color:#555">📅 ' . esc_html($b->booking_date) . ' | ⏰ ' . esc_html($b->booking_time);
                     if (!empty($b->meet_recording_link)) echo ' | <span style="color:#0f766e">هم‌اکنون یک ویدئو ثبت شده است</span>';
                     echo '</p>';
@@ -4249,7 +4249,7 @@ class GermanTeacherBookingPlugin_v10 {
             echo '<h3>بازیابی خودکار همه ضبط‌های قبلی گوگل میت</h3>';
             echo '<p style="color:#555;line-height:2">همه کلاس‌های گذشته Meet که هنوز ویدئویی ندارند بررسی می‌شوند. فقط تطبیق‌های مطمئن (امتیاز بالا یا پیوست رسمی گوگل) ثبت می‌شوند و هیچ لینک موجودی بازنویسی نمی‌شود.</p>';
             echo '<button class="button button-primary" id="gtbp-meet-backfill">شروع بازیابی ضبط‌های گوگل میت</button> <span id="gtbp-meet-backfill-status" style="margin-right:10px;color:#555"></span>';
-            echo '<script>(function(){var btn=document.getElementById("gtbp-meet-backfill"),out=document.getElementById("gtbp-meet-backfill-status");if(!btn)return;btn.addEventListener("click",function(){btn.disabled=true;var cursor=0,total=0,assigned=0,skipped=0,failed=0;function run(){var d=new FormData();d.append("action","gtbp_meet_backfill_recordings");d.append("nonce","' . esc_js($meet_bulk_nonce) . '");d.append("cursor",cursor);fetch(ajaxurl,{method:"POST",credentials:"same-origin",body:d}).then(function(r){return r.json()}).then(function(r){if(!r.success)throw new Error(typeof r.data==="string"?r.data:"خطای گوگل درایو");var x=r.data;cursor=x.next_cursor;total+=x.processed;assigned+=x.assigned;skipped+=x.skipped;failed+=x.failed;out.textContent="بررسی‌شده: "+total+" | ثبت‌شده: "+assigned+" | نامطمئن (نیاز به انتخاب دستی): "+skipped+" | خطا: "+failed;if(x.done){btn.disabled=false;out.textContent+=" — بررسی کامل شد.";}else run();}).catch(function(e){btn.disabled=false;out.textContent="متوقف شد: "+e.message;});}run();});})();</script>';
+            echo '<script>(function(){var btn=document.getElementById("gtbp-meet-backfill"),out=document.getElementById("gtbp-meet-backfill-status");if(!btn)return;btn.addEventListener("click",function(){btn.disabled=true;var cursor=0,total=0,assigned=0,skipped=0,failed=0;function run(){var d=new FormData();d.append("action","gtbp_meet_backfill_recordings");d.append("nonce","' . esc_js($meet_bulk_nonce) . '");d.append("cursor",cursor);fetch(ajaxurl,{method:"POST",credentials:"same-origin",body:d}).then(function(r){return r.json()}).then(function(r){if(!r.success)throw new Error(typeof r.data==="string"?r.data:"خطای گوگل درایو");var x=r.data;cursor=x.next_cursor;total+=x.processed;assigned+=x.assigned;skipped+=x.skipped;failed+=x.failed;out.textContent="بررسی‌شده: "+total+" | ثبت‌شده: "+assigned+" | نامطمئن (نیاز به انتخاب دستی): "+skipped+" | خطا: "+failed;if(x.done){btn.disabled=false;out.textContent+=" – بررسی کامل شد.";}else run();}).catch(function(e){btn.disabled=false;out.textContent="متوقف شد: "+e.message;});}run();});})();</script>';
             echo '</div>';
         }
         echo '</div>';

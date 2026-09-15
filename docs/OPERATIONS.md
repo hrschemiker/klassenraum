@@ -21,7 +21,7 @@ Provisioning resolves the `WORDPRESS_URL` host to its IPv4 address, adds explici
 and lifts any existing ban. If the WordPress site reports a connection timeout
 to the BigBlueButton API:
 
-1. Run `sudo bcpctl health` — the report shows whether the WordPress IP is
+1. Run `sudo bcpctl health` – the report shows whether the WordPress IP is
    whitelisted in `ufw` and whether fail2ban has banned it.
 2. Run `sudo bcpctl whitelist-wordpress` (also part of `sudo bcpctl repair`) to
    restore the whitelist and unban the address. Re-run it after the WordPress
