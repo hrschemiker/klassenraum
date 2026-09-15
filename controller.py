@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parent
 STATE_DIR = Path.home() / ".bbb-control-plane"
 PROFILE_FILE = STATE_DIR / "profile.json"
 KEYRING_SERVICE = "bbb-control-plane"
-APP_VERSION = "1.3.11"
+APP_VERSION = "1.4.0"
 HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$")
 
 
