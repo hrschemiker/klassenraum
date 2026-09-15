@@ -6,6 +6,34 @@ ROOT = Path(__file__).parents[1]
 
 
 class ProvisioningSafetyTests(unittest.TestCase):
+    def test_wordpress_bridge_does_not_intercept_other_telegram_bots(self):
+        bridge = (ROOT / "wordpress" / "gtbp-recording-bridge" / "gtbp-recording-bridge.php").read_text(encoding="utf-8")
+        self.assertNotIn("pre_http_request", bridge)
+        self.assertNotIn("telegram_transport", bridge)
+        self.assertIn("bbb_presentation_link", bridge)
+        self.assertIn("bbb_video_link", bridge)
+
+    def test_controller_exports_complete_wordpress_configuration(self):
+        controller = (ROOT / "controller.py").read_text(encoding="utf-8")
+        for requirement in ("COPY WORDPRESS CONFIG", "bbb-conf --secret", "personal_bbb_url", "personal_bbb_secret", "recording_bridge_gateway", "recording_bridge_secret"):
+            self.assertIn(requirement, controller)
+
+    def test_wordpress_host_is_whitelisted_in_firewall_and_fail2ban(self):
+        script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
+        self.assertIn('ufw allow from "$wordpress_ip" to any port 443 proto tcp', script)
+        self.assertIn("/etc/fail2ban/jail.d/bcp-wordpress.local", script)
+        self.assertIn('fail2ban-client unban "$wordpress_ip"', script)
+        # The whitelist and the fail2ban drop-in must exist before fail2ban starts.
+        self.assertLess(script.index("whitelist_wordpress_host\nufw --force enable"), script.index("start_required_service fail2ban"))
+        self.assertIn("unban_wordpress_host", script.split("start_required_service fail2ban", 1)[1])
+
+    def test_repair_restores_wordpress_access(self):
+        control = (ROOT / "provision" / "bcpctl").read_text(encoding="utf-8")
+        self.assertIn("repair_wordpress_access", control)
+        self.assertIn("wordpress_access_report", control)
+        self.assertIn("fail2ban-client unban", control)
+        self.assertIn("whitelist-wordpress", control)
+
     def test_recording_storage_is_never_removed(self):
         script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
         self.assertNotIn("rm -rf /var/bigbluebutton", script)

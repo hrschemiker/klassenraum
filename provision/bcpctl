@@ -70,6 +70,44 @@ repair_telegram_api(){
   fi
 }
 
+wordpress_ipv4(){
+  set -a; . /etc/bbb-control-plane.env 2>/dev/null || true; set +a
+  [ -n "${WORDPRESS_URL:-}" ] || { echo "WORDPRESS_URL is not configured in /etc/bbb-control-plane.env" >&2; return 1; }
+  python3 -c 'import socket, sys; from urllib.parse import urlparse; host = urlparse(sys.argv[1]).hostname; host or sys.exit(1); print(socket.gethostbyname(host))' "$WORDPRESS_URL"
+}
+
+repair_wordpress_access(){
+  local wp_ip drop_in desired
+  wp_ip=$(wordpress_ipv4) || return 1
+  ufw allow from "$wp_ip" to any port 443 proto tcp comment 'WordPress bridge API' >/dev/null
+  ufw allow from "$wp_ip" to any port 80 proto tcp comment 'WordPress bridge HTTP' >/dev/null
+  install -d -m 0755 /etc/fail2ban/jail.d
+  drop_in=/etc/fail2ban/jail.d/bcp-wordpress.local
+  desired=$(printf '%s\n' '[DEFAULT]' "ignoreip = 127.0.0.1/8 ::1 $wp_ip")
+  if [ "$(cat "$drop_in" 2>/dev/null)" != "$desired" ]; then
+    printf '%s\n' "$desired" > "$drop_in"
+    systemctl restart fail2ban 2>/dev/null || true
+  fi
+  fail2ban-client unban "$wp_ip" >/dev/null 2>&1 || true
+  echo "WordPress host $wp_ip: allowed by ufw, ignored and unbanned by fail2ban"
+}
+
+wordpress_access_report(){
+  local wp_ip
+  wp_ip=$(wordpress_ipv4) || return 0
+  echo "wordpress-host-ip: $wp_ip"
+  if ufw status | grep -Fq "$wp_ip"; then
+    echo "ufw whitelist: present"
+  else
+    echo "ufw whitelist: MISSING (run 'bcpctl repair' to restore it)"
+  fi
+  if fail2ban-client banned 2>/dev/null | grep -Fq "$wp_ip"; then
+    echo "fail2ban: WORDPRESS HOST IS BANNED (run 'bcpctl repair' to restore it)"
+  else
+    echo "fail2ban: WordPress host is not banned"
+  fi
+}
+
 guard_recording_worker(){
   if [ -f /var/lib/bcp/telegram-local.ready ]; then
     systemctl enable --now bcp-worker
@@ -87,10 +125,12 @@ case "${1:-}" in
     systemctl --no-pager --failed
     systemctl is-active bbb-rap-resque-worker telegram-bot-api
     if [ -f /var/lib/bcp/telegram-local.ready ]; then systemctl is-active bcp-worker; else echo "inactive (expected: Telegram migration pending)"; fi
+    wordpress_access_report
     df -h / /var/bigbluebutton
     ;;
   repair)
     bbb-conf --check
+    repair_wordpress_access || true
     systemctl restart bbb-rap-resque-worker
     repair_html5_config
     bbb-conf --restart
@@ -117,5 +157,9 @@ case "${1:-}" in
     /usr/bin/env python3 /usr/local/lib/bcp-telegram-migrate.py
     systemctl enable --now bcp-worker
     ;;
-  *) echo "usage: bcpctl {health|repair|restart|start|stop|queue|logs|provision-status|telegram-migrate}" >&2; exit 2 ;;
+  whitelist-wordpress)
+    repair_wordpress_access
+    wordpress_access_report
+    ;;
+  *) echo "usage: bcpctl {health|repair|restart|start|stop|queue|logs|provision-status|telegram-migrate|whitelist-wordpress}" >&2; exit 2 ;;
 esac

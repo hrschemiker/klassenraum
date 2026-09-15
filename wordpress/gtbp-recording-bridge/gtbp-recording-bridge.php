@@ -2,13 +2,13 @@
 /*
 Plugin Name: GTBP Recording Transport Bridge
 Description: Signed recording callbacks and Telegram object reference delivery.
-Version: 1.1.0
+Version: 1.2.2
 Author: Hamidreza Saadati
 */
 if (!defined('ABSPATH')) exit;
 
 final class GTBP_Recording_Transport_Bridge {
-    const DB_VERSION = '1';
+    const DB_VERSION = '2';
     const OPTION_SECRET = 'gtbp_bridge_shared_secret';
     const OPTION_GATEWAY = 'gtbp_bridge_gateway_url';
     private static $instance;
@@ -16,22 +16,25 @@ final class GTBP_Recording_Transport_Bridge {
     public static function instance() { return self::$instance ?: (self::$instance = new self()); }
     private function __construct() {
         register_activation_hook(__FILE__, [$this, 'activate']);
+        add_action('init', [$this, 'maybe_upgrade']);
         add_action('rest_api_init', [$this, 'routes']);
         add_action('admin_menu', [$this, 'menu']);
         add_filter('gtbp_bot_videos_handled', [$this, 'bot_videos'], 10, 6);
-        add_filter('pre_http_request', [$this, 'telegram_transport'], 10, 3);
     }
     private function table() { global $wpdb; return $wpdb->prefix . 'gtbp_recording_transport'; }
     public function activate() {
         global $wpdb;
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         $charset = $wpdb->get_charset_collate();
-        dbDelta("CREATE TABLE {$this->table()} (
+        $table = $this->table();
+        dbDelta("CREATE TABLE {$table} (
           id bigint unsigned NOT NULL AUTO_INCREMENT,
           booking_id bigint unsigned DEFAULT NULL,
           session_id bigint unsigned DEFAULT NULL,
           record_id varchar(191) NOT NULL,
+          presentation_url text DEFAULT NULL,
           video_url text DEFAULT NULL,
+          filename varchar(191) DEFAULT NULL,
           telegram_file_id text DEFAULT NULL,
           telegram_file_unique_id varchar(191) DEFAULT NULL,
           telegram_chat_id varchar(64) DEFAULT NULL,
@@ -46,6 +49,9 @@ final class GTBP_Recording_Transport_Bridge {
         ) $charset;");
         update_option('gtbp_bridge_db_version', self::DB_VERSION, false);
     }
+    public function maybe_upgrade() {
+        if ((string)get_option('gtbp_bridge_db_version', '') !== self::DB_VERSION) $this->activate();
+    }
     public function routes() {
         register_rest_route('gtbp-bridge/v1', '/recording-ready', ['methods'=>'POST','callback'=>[$this,'receive'],'permission_callback'=>'__return_true']);
         register_rest_route('gtbp-bridge/v1', '/health', ['methods'=>'GET','callback'=>[$this,'health'],'permission_callback'=>'__return_true']);
@@ -56,22 +62,7 @@ final class GTBP_Recording_Transport_Bridge {
         $ts=(string)$request->get_header('x-bcp-timestamp');
         $sig=(string)$request->get_header('x-bcp-signature');
         $authenticated=strlen($secret)>=32 && ctype_digit($ts) && abs(time()-intval($ts))<=300 && hash_equals(hash_hmac('sha256',$ts.'.bridge-ready',$secret),$sig);
-        return ['ok'=>true,'version'=>'1.1.0','gateway_configured'=>(bool)preg_match('#^https://[^/]+/telegram-api/?$#',$gateway),'authenticated'=>$authenticated];
-    }
-    public function telegram_transport($preempt, $args, $url) {
-        static $forwarding=false;
-        if ($forwarding || !is_string($url) || !preg_match('#^https://api\.telegram\.org/(bot|file/bot)#',$url)) return $preempt;
-        $gateway=rtrim((string)get_option(self::OPTION_GATEWAY,''),'/');
-        $secret=(string)get_option(self::OPTION_SECRET,'');
-        if (!preg_match('#^https://[^/]+/telegram-api$#',$gateway) || strlen($secret)<32) return $preempt;
-        $path=(string)wp_parse_url($url,PHP_URL_PATH);
-        $query=(string)wp_parse_url($url,PHP_URL_QUERY);
-        $target=$gateway.$path.($query!==''?'?'.$query:'');
-        $args['headers']=isset($args['headers']) && is_array($args['headers'])?$args['headers']:[];
-        $args['headers']['X-BCP-Gateway-Secret']=$secret;
-        $forwarding=true;
-        try { return wp_remote_request($target,$args); }
-        finally { $forwarding=false; }
+        return ['ok'=>true,'version'=>'1.2.2','gateway_configured'=>(bool)preg_match('#^https://[^/]+/telegram-api/?$#',$gateway),'authenticated'=>$authenticated];
     }
     private function authorized(WP_REST_Request $request) {
         $secret = (string)get_option(self::OPTION_SECRET, '');
@@ -93,16 +84,23 @@ final class GTBP_Recording_Transport_Bridge {
         if (!$booking_id) $booking_id = intval($wpdb->get_var($wpdb->prepare("SELECT id FROM {$bookings} WHERE roomeet_room_id=%s ORDER BY id DESC LIMIT 1", $record_id)));
         $session_id = $booking_id ? intval($wpdb->get_var($wpdb->prepare("SELECT id FROM {$sessions} WHERE booking_id=%d LIMIT 1", $booking_id))) : 0;
         $now = current_time('mysql');
-        $data = ['booking_id'=>$booking_id ?: null,'session_id'=>$session_id ?: null,'record_id'=>$record_id,'video_url'=>esc_url_raw($p['video_url'] ?? ''),'telegram_file_id'=>$file_id,'telegram_file_unique_id'=>sanitize_text_field($p['file_unique_id'] ?? ''),'telegram_chat_id'=>sanitize_text_field($p['chat_id'] ?? ''),'telegram_message_id'=>intval($p['message_id'] ?? 0),'file_size'=>intval($p['file_size'] ?? 0),'sha256'=>sanitize_text_field($p['sha256'] ?? ''),'duration'=>floatval($p['duration'] ?? 0),'status'=>'ready','updated_at'=>$now];
-        $existing = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$this->table()} WHERE record_id=%s", $record_id));
-        if ($existing) $wpdb->update($this->table(), $data, ['id'=>intval($existing)]); else { $data['created_at']=$now; $wpdb->insert($this->table(), $data); }
-        if ($booking_id && !empty($data['video_url'])) {
+        $data = ['booking_id'=>$booking_id ?: null,'session_id'=>$session_id ?: null,'record_id'=>$record_id,'presentation_url'=>esc_url_raw($p['presentation_url'] ?? ''),'video_url'=>esc_url_raw($p['video_url'] ?? ''),'filename'=>sanitize_file_name($p['filename'] ?? ''),'telegram_file_id'=>$file_id,'telegram_file_unique_id'=>sanitize_text_field($p['file_unique_id'] ?? ''),'telegram_chat_id'=>sanitize_text_field($p['chat_id'] ?? ''),'telegram_message_id'=>intval($p['message_id'] ?? 0),'file_size'=>intval($p['file_size'] ?? 0),'sha256'=>sanitize_text_field($p['sha256'] ?? ''),'duration'=>floatval($p['duration'] ?? 0),'status'=>'ready','updated_at'=>$now];
+        $table = $this->table();
+        $existing = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$table} WHERE record_id=%s", $record_id));
+        if ($existing) $wpdb->update($table, $data, ['id'=>intval($existing)]); else { $data['created_at']=$now; $wpdb->insert($table, $data); }
+        $preferred_url = $data['presentation_url'] ?: $data['video_url'];
+        if ($booking_id && $preferred_url !== '') {
+            $booking_columns=(array)$wpdb->get_col("SHOW COLUMNS FROM {$bookings}");
+            $booking_data=['roomeet_recording_checked'=>$now];
             $old = $wpdb->get_var($wpdb->prepare("SELECT roomeet_recording_link FROM {$bookings} WHERE id=%d",$booking_id));
-            if (!$old) $wpdb->update($bookings, ['roomeet_recording_link'=>$data['video_url'],'roomeet_recording_checked'=>$now], ['id'=>$booking_id]);
+            if (!$old) $booking_data['roomeet_recording_link']=$preferred_url;
+            if (in_array('bbb_presentation_link',$booking_columns,true)) $booking_data['bbb_presentation_link']=$data['presentation_url'];
+            if (in_array('bbb_video_link',$booking_columns,true)) $booking_data['bbb_video_link']=$data['video_url'];
+            $wpdb->update($bookings,$booking_data,['id'=>$booking_id]);
         }
-        if ($session_id && !empty($data['video_url'])) {
+        if ($session_id && $preferred_url !== '') {
             $row=$wpdb->get_row($wpdb->prepare("SELECT video_url,video_url_source FROM {$sessions} WHERE id=%d",$session_id));
-            if ($row && !((string)$row->video_url_source==='manual' && trim((string)$row->video_url)!=='')) $wpdb->update($sessions,['video_url'=>$data['video_url'],'video_url_source'=>'auto'],['id'=>$session_id]);
+            if ($row && !((string)$row->video_url_source==='manual' && trim((string)$row->video_url)!=='')) $wpdb->update($sessions,['video_url'=>$preferred_url,'video_url_source'=>'auto'],['id'=>$session_id]);
         }
         return ['ok'=>true,'booking_id'=>$booking_id,'session_id'=>$session_id];
     }
@@ -110,7 +108,8 @@ final class GTBP_Recording_Transport_Bridge {
         if ($platform !== 'telegram') return $handled;
         $user_id = intval($state['data']['user_id'] ?? 0); if (!$user_id) return false;
         global $wpdb; $sessions=$wpdb->prefix.'gls_sessions';
-        $rows=$wpdb->get_results($wpdb->prepare("SELECT t.telegram_file_id,s.jalali_date,s.class_name FROM {$this->table()} t INNER JOIN {$sessions} s ON s.id=t.session_id WHERE t.status='ready' AND s.user_id=%d ORDER BY s.booking_date DESC LIMIT 20",$user_id));
+        $table=$this->table();
+        $rows=$wpdb->get_results($wpdb->prepare("SELECT t.telegram_file_id,s.jalali_date,s.class_name FROM {$table} t INNER JOIN {$sessions} s ON s.id=t.session_id WHERE t.status='ready' AND s.user_id=%d ORDER BY s.booking_date DESC LIMIT 20",$user_id));
         if (!$rows) return false;
         foreach ($rows as $r) wp_remote_post('https://api.telegram.org/bot'.$token.'/sendVideo',['timeout'=>60,'body'=>['chat_id'=>$chat_id,'video'=>$r->telegram_file_id,'caption'=>$r->jalali_date.' | '.$r->class_name,'protect_content'=>'true']]);
         return true;
@@ -123,7 +122,7 @@ final class GTBP_Recording_Transport_Bridge {
             if ($secret!=='') update_option(self::OPTION_SECRET,$secret,false);
             update_option(self::OPTION_GATEWAY,esc_url_raw(rtrim(wp_unslash($_POST['gateway']??''),'/')),false);
         }
-        global $wpdb; $rows=$wpdb->get_results("SELECT * FROM {$this->table()} ORDER BY id DESC LIMIT 100");
+        global $wpdb; $table=$this->table(); $rows=$wpdb->get_results("SELECT * FROM {$table} ORDER BY id DESC LIMIT 100");
         echo '<div class="wrap"><h1>Recording Transport</h1><form method="post">'; wp_nonce_field('gtbp_bridge_save');
         echo '<p><label>Gateway URL <input type="url" name="gateway" value="'.esc_attr(get_option(self::OPTION_GATEWAY,'')).'" size="70" placeholder="https://media.example.com/telegram-api"></label></p>';
         echo '<p><label>Shared secret <input type="password" name="secret" value="" size="70" autocomplete="new-password"></label> <button class="button button-primary" name="save">Save</button></p></form>';

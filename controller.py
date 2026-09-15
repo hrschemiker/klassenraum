@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parent
 STATE_DIR = Path.home() / ".bbb-control-plane"
 PROFILE_FILE = STATE_DIR / "profile.json"
 KEYRING_SERVICE = "bbb-control-plane"
-APP_VERSION = "1.3.7"
+APP_VERSION = "1.3.11"
 HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$")
 
 
@@ -241,6 +241,7 @@ class App(tk.Tk):
             button = ttk.Button(actions, text=text, command=lambda a=action: self._start(a))
             button.pack(side="left", padx=(0, 8)); self.action_buttons.append(button)
         ttk.Button(actions, text="COPY BRIDGE CONFIG", command=self._copy_bridge_config).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="COPY WORDPRESS CONFIG", command=self._copy_wordpress_config).pack(side="left", padx=(0, 8))
         setup.columnconfigure(1, weight=1)
 
         ttk.Label(manage, text="WEB CONSOLES", style="Title.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
@@ -303,6 +304,65 @@ class App(tk.Tk):
             messagebox.showinfo("Bridge configuration", "The WordPress bridge settings are copied to the clipboard.")
         except Exception as exc:
             messagebox.showerror("Bridge configuration", str(exc))
+
+    def _wordpress_config_path(self, hostname: str) -> Path:
+        safe_hostname = clean_value("media hostname", hostname)
+        if not HOST_RE.match(safe_hostname):
+            raise ControllerError("Invalid fully qualified hostname")
+        return STATE_DIR / f"{safe_hostname}-wordpress.json"
+
+    def _capture_wordpress_config(self, ssh: SSH, values: dict[str, str]) -> Path:
+        code, output = ssh.run("sudo bbb-conf --secret", timeout=60)
+        if code:
+            raise ControllerError("BigBlueButton did not return its API credentials")
+        url_match = re.search(r"(?mi)^\s*URL:\s*(\S+)\s*$", output)
+        secret_match = re.search(r"(?mi)^\s*Secret:\s*(\S+)\s*$", output)
+        if not url_match or not secret_match:
+            raise ControllerError("BigBlueButton API URL or secret was missing from bbb-conf output")
+        private_file = STATE_DIR / f"{values['hostname']}.env"
+        if not private_file.is_file():
+            raise ControllerError("Private recovery settings are missing. Run PROVISION once before exporting WordPress settings")
+        private_values = {}
+        for line in private_file.read_text(encoding="utf-8").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                private_values[key] = value
+        bridge_secret = private_values.get("BRIDGE_SHARED_SECRET", "")
+        if len(bridge_secret) < 32:
+            raise ControllerError("The recording bridge shared secret is missing or invalid")
+        config = {
+            "personal_bbb_url": url_match.group(1),
+            "personal_bbb_secret": secret_match.group(1),
+            "recording_bridge_gateway": f"https://{values['hostname']}/telegram-api",
+            "recording_bridge_secret": bridge_secret,
+        }
+        STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+        target = self._wordpress_config_path(values["hostname"])
+        target.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        target.chmod(0o600)
+        return target
+
+    def _copy_wordpress_config(self):
+        try:
+            hostname = self.values["hostname"].get().strip()
+            target = self._wordpress_config_path(hostname)
+            if not target.is_file():
+                raise ControllerError("No exported settings were found. Run REPAIR once, then use this button")
+            config = json.loads(target.read_text(encoding="utf-8"))
+            required = ("personal_bbb_url", "personal_bbb_secret", "recording_bridge_gateway", "recording_bridge_secret")
+            if any(not config.get(key) for key in required):
+                raise ControllerError("The saved WordPress settings are incomplete. Run REPAIR once")
+            content = (
+                f"Personal BBB URL: {config['personal_bbb_url']}\n"
+                f"Personal BBB secret: {config['personal_bbb_secret']}\n"
+                f"Recording bridge gateway: {config['recording_bridge_gateway']}\n"
+                f"Recording bridge shared secret: {config['recording_bridge_secret']}"
+            )
+            self.clipboard_clear(); self.clipboard_append(content)
+            self.status.set("WORDPRESS CONFIG COPIED")
+            messagebox.showinfo("WordPress configuration", "All Personal BBB and recording bridge settings are copied to the clipboard.")
+        except Exception as exc:
+            messagebox.showerror("WordPress configuration", str(exc))
 
     def _save_log(self):
         target = filedialog.asksaveasfilename(defaultextension=".log", filetypes=[("Log files", "*.log"), ("All files", "*")])
@@ -430,11 +490,18 @@ class App(tk.Tk):
                     command = "sudo install -m 0600 /tmp/bcp.env /etc/bbb-control-plane.env && rm -f /tmp/bcp.env && sudo bash /opt/bbb-control-plane/source/provision/launch.sh"
                     code, out = ssh.run(command, timeout=30000, emit=self.events.put)
                     self.events.put(f"Private recovery settings saved at {private_file}\n")
+                elif action == "repair":
+                    ssh.put_release(ROOT, self.events.put)
+                    command = "sudo install -m 0755 /opt/bbb-control-plane/source/worker/worker.py /usr/local/lib/bcp-worker.py && sudo install -m 0755 /opt/bbb-control-plane/source/worker/post_publish.py /usr/local/lib/bcp-post-publish.py && sudo install -m 0755 /opt/bbb-control-plane/source/provision/bcpctl /usr/local/sbin/bcpctl && sudo systemctl restart bcp-worker && sudo /usr/local/sbin/bcpctl repair"
+                    code, out = ssh.run(command, timeout=3600, emit=self.events.put)
                 else:
                     code, out = ssh.run(f"sudo /usr/local/sbin/bcpctl {shlex.quote(action)}", emit=self.events.put)
                 self.events.put(out)
                 if code:
                     raise ControllerError(f"Operation exited with status {code}")
+                if action in {"provision", "repair"}:
+                    target = self._capture_wordpress_config(ssh, v)
+                    self.events.put(f"WordPress integration settings saved locally at {target}\n")
                 self.events.put("Operation completed successfully.\n")
             finally:
                 ssh.close()

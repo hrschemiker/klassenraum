@@ -13,6 +13,25 @@ sudo journalctl -u telegram-bot-api -n 200 --no-pager
 sudo journalctl -u bcp-provision -n 200 --no-pager
 ```
 
+## WordPress connectivity (cURL error 28 / HTTP status 0)
+
+Provisioning resolves the `WORDPRESS_URL` host to its IPv4 address, adds explicit
+`ufw` allow rules for it on ports 80 and 443, writes
+`/etc/fail2ban/jail.d/bcp-wordpress.local` so fail2ban never bans that address,
+and lifts any existing ban. If the WordPress site reports a connection timeout
+to the BigBlueButton API:
+
+1. Run `sudo bcpctl health` — the report shows whether the WordPress IP is
+   whitelisted in `ufw` and whether fail2ban has banned it.
+2. Run `sudo bcpctl whitelist-wordpress` (also part of `sudo bcpctl repair`) to
+   restore the whitelist and unban the address. Re-run it after the WordPress
+   host changes its IP address.
+3. If the timeout persists although the local firewall accepts the address, the
+   block is outside this server: ask the datacenter of the BigBlueButton server
+   to allow inbound TCP 80/443 from the WordPress IP in the upstream or edge
+   firewall, and ask the WordPress host to confirm outbound TCP 443 with
+   `curl -4 -Iv --connect-timeout 15 https://<BBB_HOSTNAME>/bigbluebutton/api`.
+
 ## Update procedure
 
 1. Confirm no meeting is active.
