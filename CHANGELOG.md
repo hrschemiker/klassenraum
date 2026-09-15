@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.0
+## 1.4.0 (2026-09-15)
 
 Adds the WordPress booking and learning plugin to the repository so the whole
 teaching stack is backed up in one place, and repairs Google Meet recording
